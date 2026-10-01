@@ -1,0 +1,71 @@
+#!/bin/sh
+# SPDX-License-Identifier: ISC
+#
+# outis - cut the SGI Odyssey (VPro) microcode blobs used by the Linux
+# drm/sgi odyssey driver out of SGI patch SG0007208.
+#
+# Copyright (c) 2026 Imre Kaloz <kaloz@kernel.org>
+#
+# Permission to use, copy, modify, and/or distribute this software for
+# any purpose with or without fee is hereby granted, provided that the
+# above copyright notice and this permission notice appear in all
+# copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL
+# WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE
+# AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL
+# DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR
+# PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+# TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+# PERFORMANCE OF THIS SOFTWARE.
+#
+# The PROM image is compressed in the patch, and the graphics code in
+# the PROM is gzipped again. The blobs are at fixed offsets inside it.
+
+IMG_OFF=0x1c2c IMG_LEN=1323745 BODY_OFF=0x8cbb0
+TARDIST=patchSG0007208.tardist
+TARDIST_SHA=ab0246604421baa40c3e0e6a0a588cafb1bfee5fca0ab9f45a0a3b67d1167c1c
+BUZZ=odyssey_buzz_ucode.bin
+FINISH=odyssey_buzz_finish.bin
+
+die()
+{
+	echo "outis: $*" >&2
+	exit 1
+}
+
+if [ ! -f $TARDIST ]; then
+	cat >&2 <<EOT
+outis cuts the SGI Odyssey microcode blobs $BUZZ
+and $FINISH out of SGI patch SG0007208.
+
+Download
+  https://archive.org/download/sgi-irix-patches/patches_6.5.30.tar/$TARDIST
+into this directory and run outis again.
+EOT
+	exit 1
+fi
+
+[ "$(sha256sum <$TARDIST)" = "$TARDIST_SHA  -" ] ||
+	die "$TARDIST: sha256 mismatch"
+
+# blob OFFSET LENGTH SHA FILE: cut FILE from the io7prom body, verify it.
+# gzip warns about the padding after both members, hence 2>/dev/null.
+blob()
+{
+	tail -c +$((IMG_OFF + 1)) $TARDIST | head -c $IMG_LEN |
+		gzip -dc 2>/dev/null | tail -c +$((BODY_OFF + 1)) |
+		gzip -dc 2>/dev/null | tail -c +$(($1 + 1)) | head -c $2 >$4
+	[ "$(sha256sum <$4)" = "$3  -" ] || {
+		rm -f $BUZZ $FINISH
+		die "$4: sha256 mismatch"
+	}
+}
+
+blob 0x12df68 27196 9955bc1bad614a4d28bc3a56914b2037cb1ab45bcb7e8bc2432d9d31804d9133 $BUZZ
+blob 0x134eb0 16840 a620421b003907db2f0e899877a1377a7c90a9863e541f63c869d701dbad2226 $FINISH
+
+echo "Wrote $BUZZ and $FINISH to $PWD."
+echo "Copy them to /lib/firmware/sgi/:"
+echo "  mkdir -p /lib/firmware/sgi && cp odyssey_*.bin /lib/firmware/sgi/"
